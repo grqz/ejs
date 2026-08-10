@@ -42,29 +42,6 @@ const identifier: DeepPartial<ESTree.Node> = {
   ],
 } as const;
 
-function xoredIdent(
-  arr: ESTree.MemberExpression | ESTree.Identifier,
-  keyName: string,
-): DeepPartial<ESTree.MemberExpression> {
-  return {
-    type: "MemberExpression",
-    object: arr,
-    computed: true,
-    property: {
-      type: "BinaryExpression",
-      operator: "^",
-      anykey: [
-        {
-          type: "Identifier",
-          name: keyName,
-        },
-        { type: "Literal" },
-      ],
-    },
-    optional: false,
-  };
-}
-
 // we want to match "alr", arr[1234], or arr[K^5678]
 function alrYesLike(
   strings: DeepPartial<ESTree.Expression>[],
@@ -101,29 +78,25 @@ const asdasd = alrYesLike([{
 
 function unwrapCondLike(predVar: string, stmt: ESTree.Statement): ESTree.Statement[] | null {
   const matchTestSub: DeepPartial<ESTree.Expression> = {
-    or: [],
+    or: [{ type: "Literal" }, { type: "Identifier", name: predVar }],
   };
-  const matchTestB: DeepPartial<ESTree.BinaryExpression> = {
-    type: "BinaryExpression",
-    left: matchTestSub,
-    right: matchTestSub,
-    operator: { or: ["+", "-", "&", "^", "|", "<<", ">>", ">>>", "==", "===", "!=", "!==", ">", "<", ">=", "<=", "*"] },
-  }, matchTestU: DeepPartial<ESTree.UnaryExpression> = {
-    type: "UnaryExpression",
-    argument: matchTestSub,
-    operator: { or: ["+", "-", "!", "~", "void"] },
-  }, matchTestL: DeepPartial<ESTree.LogicalExpression> = {
-    type: "LogicalExpression",
-    left: matchTestSub,
-    right: matchTestSub,
-  };
-  matchTestSub.or.push(matchTestB, matchTestU, { type: "Literal" }, {
-    type: "Identifier",
-    name: predVar,
-  });
   const predicate: DeepPartial<ESTree.Expression> = {
-    or: [matchTestB, matchTestU, matchTestL],
+    or: [{
+      type: "BinaryExpression",
+      left: matchTestSub,
+      right: matchTestSub,
+      operator: { or: ["+", "-", "&", "^", "|", "<<", ">>", ">>>", "==", "===", "!=", "!==", ">", "<", ">=", "<=", "*"] },
+    }, {
+      type: "UnaryExpression",
+      argument: matchTestSub,
+      operator: { or: ["+", "-", "!", "~", "void"] },
+    }, {
+      type: "LogicalExpression",
+      left: matchTestSub,
+      right: matchTestSub,
+    }],
   };
+  matchTestSub.or.push(...predicate.or);
   if (matchesStructure(stmt, {
     type: "IfStatement",
     test: predicate,
@@ -352,7 +325,23 @@ export function extract(
           })) {
             const prologue = stmt as ESTree.VariableDeclaration;
             const keyName = (prologue.declarations[0].id as ESTree.Identifier).name;
-            const xored = xoredIdent(findArrRet.arr, keyName);
+            const xored: DeepPartial<ESTree.MemberExpression> = {
+              type: "MemberExpression",
+              object: findArrRet.arr,
+              computed: true,
+              property: {
+                type: "BinaryExpression",
+                operator: "^",
+                anykey: [
+                  {
+                    type: "Identifier",
+                    name: keyName,
+                  },
+                  { type: "Literal" },
+                ],
+              },
+              optional: false,
+            };
             zxcv = {
               prologue,
               keyName,
@@ -366,13 +355,6 @@ export function extract(
         const body = unwrapCondLike(predVar, stmt);
         if (body === null)
           continue;
-        // 879f tcl2/tcl4 looks like
-        //   k[g.q[Z^705]](g.q[Z^1151])||k[g.q[Z^847]](g.q[Z^1151],g.q[Z^1393]);
-        // i.e.
-        // if (!k.get('alr'))
-        //   k.set('alr', 'yes');
-        // the expression is inside a || logical expression
-        // what should we do about it?
         for (const bStmt of body) {
           if (!matchesStructure(bStmt, xoredStruct))
             continue;
