@@ -44,10 +44,9 @@ const identifier: DeepPartial<ESTree.Node> = {
 
 // we want to match "alr", arr[1234], or arr[K^5678]
 function alrYesLike(
-  strings: DeepPartial<ESTree.Expression>[],
+  [set, alr, yes]: DeepPartial<ESTree.Expression>[],
   notComputed?: boolean,
 ): DeepPartial<ESTree.ExpressionStatement> {
-  const [set, alr, yes] = strings;
   return {
     type: "ExpressionStatement",
     expression: {
@@ -303,13 +302,13 @@ export function extract(
 
       const { argument: retExpr } = statements[statements.length - 1] as ESTree.ReturnStatement;
       const { name: retVar } = retExpr as ESTree.Identifier;
-      let zxcv: {
+      let funcInfo: {
         prologue: ESTree.VariableDeclaration;
         keyName: string;
         xoredStruct: DeepPartial<ESTree.ExpressionStatement>;
       } | undefined;
       for (const stmt of statements) {
-        if (zxcv === undefined) {
+        if (funcInfo === undefined) {
           if (matchesStructure(stmt, {
             type: "VariableDeclaration",
             declarations: [{
@@ -342,7 +341,7 @@ export function extract(
               },
               optional: false,
             };
-            zxcv = {
+            funcInfo = {
               prologue,
               keyName,
               xoredStruct: alrYesLike([xored, xored, xored]),
@@ -351,7 +350,7 @@ export function extract(
           }
           break;
         }
-        const { prologue, keyName, xoredStruct } = zxcv;
+        const { prologue, keyName, xoredStruct } = funcInfo;
         const body = unwrapCondLike(predVar, stmt);
         if (body === null)
           continue;
