@@ -75,22 +75,31 @@ const asdasd = alrYesLike([{
   value: "yes",
 }], true);
 
-function unwrapCondLike(predVar: string, stmt: ESTree.Statement): ESTree.Statement[] | null {
+function unwrapCondLike(
+  predVar: string,
+  stmt: ESTree.Statement
+): ESTree.Statement[] | null {
   const matchTestSub: DeepPartial<ESTree.Expression> = {
     or: [{ type: "Literal" }, { type: "Identifier", name: predVar }],
   };
   const predicate: DeepPartial<ESTree.Expression> = {
     or: [{
       type: "BinaryExpression",
+      operator: {
+        or: [
+          "+", "-", "&", "^", "|", "<<", ">>", ">>>", "==",
+          "===", "!=", "!==", ">", "<", ">=", "<=", "*",
+        ],
+      },
       left: matchTestSub,
       right: matchTestSub,
-      operator: { or: ["+", "-", "&", "^", "|", "<<", ">>", ">>>", "==", "===", "!=", "!==", ">", "<", ">=", "<=", "*"] },
     }, {
       type: "UnaryExpression",
-      argument: matchTestSub,
       operator: { or: ["+", "-", "!", "~", "void"] },
+      argument: matchTestSub,
     }, {
       type: "LogicalExpression",
+      operator: { or: ["||", "&&"] },
       left: matchTestSub,
       right: matchTestSub,
     }],
@@ -127,8 +136,6 @@ function unwrapCondLike(predVar: string, stmt: ESTree.Statement): ESTree.Stateme
   }
 
   return null;
-  // TODO: ConditionalExpression doesn't seem to be used
-  // should we support it?
 }
 
 const strArrInit: DeepPartial<ESTree.Expression> = {
@@ -271,8 +278,8 @@ export function extract(
     }
   }
 
-  const rawIdx = findArrRet !== null ? alrYesLike(
-    findArrRet.indices.map((x): DeepPartial<ESTree.MemberExpression>=>({
+  const rawIdx = findArrRet !== null && alrYesLike(findArrRet.indices.map(
+    (x): DeepPartial<ESTree.MemberExpression>=>({
       type: "MemberExpression",
       object: findArrRet.arr,
       computed: true,
@@ -281,7 +288,7 @@ export function extract(
         value: x,
       },
       optional: false,
-    }))) : undefined;
+  })));
   for (const { name, params, statements } of options) {
     // can we modify matchesStructure to extract a value like traverse_obj does?
     if (matchesStructure(statements, { anykey: [asdasd] })) {
@@ -300,8 +307,8 @@ export function extract(
           continue;
       const predVar = params[0].name;
 
-      const { argument: retExpr } = statements[statements.length - 1] as ESTree.ReturnStatement;
-      const { name: retVar } = retExpr as ESTree.Identifier;
+      const retStmt = statements[statements.length - 1] as ESTree.ReturnStatement;
+      const retIdent = retStmt.argument as ESTree.Identifier;
       let funcInfo: {
         prologue: ESTree.VariableDeclaration;
         keyName: string;
@@ -309,7 +316,7 @@ export function extract(
       } | undefined;
       for (const stmt of statements) {
         if (funcInfo === undefined) {
-          if (matchesStructure(stmt, {
+          if (!matchesStructure(stmt, {
             type: "VariableDeclaration",
             declarations: [{
               type: "VariableDeclarator",
@@ -317,38 +324,38 @@ export function extract(
               init: {
                 type: "BinaryExpression",
                 left: { type: "Identifier" },
-                right: { type: "Identifier" },
                 operator: "^",
+                right: { type: "Identifier" },
               },
             }],
-          })) {
-            const prologue = stmt as ESTree.VariableDeclaration;
-            const keyName = (prologue.declarations[0].id as ESTree.Identifier).name;
-            const xored: DeepPartial<ESTree.MemberExpression> = {
-              type: "MemberExpression",
-              object: findArrRet.arr,
-              computed: true,
-              property: {
-                type: "BinaryExpression",
-                operator: "^",
-                anykey: [
-                  {
-                    type: "Identifier",
-                    name: keyName,
-                  },
-                  { type: "Literal" },
-                ],
-              },
-              optional: false,
-            };
-            funcInfo = {
-              prologue,
-              keyName,
-              xoredStruct: alrYesLike([xored, xored, xored]),
-            }
-            continue;
+          }))
+            break;
+          const prologue = stmt as ESTree.VariableDeclaration;
+          const { declarations: [{ id: keyIdent }] } = prologue;
+          const { name: keyName } = keyIdent as ESTree.Identifier;
+          const xored: DeepPartial<ESTree.MemberExpression> = {
+            type: "MemberExpression",
+            object: findArrRet.arr,
+            computed: true,
+            property: {
+              type: "BinaryExpression",
+              operator: "^",
+              anykey: [
+                {
+                  type: "Identifier",
+                  name: keyName,
+                },
+                { type: "Literal" },
+              ],
+            },
+            optional: false,
+          };
+          funcInfo = {
+            prologue,
+            keyName,
+            xoredStruct: alrYesLike([xored, xored, xored]),
           }
-          break;
+          continue;
         }
         const { prologue, keyName, xoredStruct } = funcInfo;
         const body = unwrapCondLike(predVar, stmt);
@@ -381,9 +388,10 @@ export function extract(
 
           if (matchesStructure(body[body.length - 1], {
             type: "VariableDeclaration",
+            kind: "var",
             declarations: [{
               type: "VariableDeclarator",
-              id: { type: "Identifier", name: retVar },
+              id: retIdent,
             }],
           })) {
             const { declarations: [{ init: right }] } = body[body.length - 1] as ESTree.VariableDeclaration;
@@ -392,8 +400,8 @@ export function extract(
               type: "ExpressionStatement",
               expression: {
                 type: "AssignmentExpression",
+                left: retIdent,
                 operator: "=",
-                left: { type: "Identifier", name: retVar },
                 right,
               }
             }
@@ -402,8 +410,8 @@ export function extract(
             type: "ExpressionStatement",
             expression: {
               type: "AssignmentExpression",
+              left: retIdent,
               operator: "=",
-              left: { type: "Identifier", name: retVar },
             },
           }))
             continue;
@@ -413,13 +421,12 @@ export function extract(
             type: "Literal",
             value: lastKey,
           };
+          // vars can be redeclared
           prologue.declarations.push({
             type: "VariableDeclarator",
-            id: { type: "Identifier", name: retVar },
+            id: retIdent,
             init: null,
           });
-          const deadifs = statements.filter(st=>st.type === "IfStatement");
-          deadifs.forEach(st=>st.test = { type: "Literal", value: false });
           return createSolver({
             type: "ArrowFunctionExpression",
             params: params.slice(2),
@@ -429,13 +436,13 @@ export function extract(
                 prologue,
                 {
                   type: "BlockStatement",
-                  body
+                  body,
                 },
-                {
-                  type: "ReturnStatement",
-                  argument: { type: "Identifier", name: retVar },
-                },
-                ...deadifs,
+                retStmt,
+                ...statements.filter(st=>st !== stmt && st.type === "IfStatement"),
+                // keep potential variable declarations from other if statements
+                // so we dont get reference errors
+                // we put them after return so they aren't really executed
               ],
             },
             async: false,
