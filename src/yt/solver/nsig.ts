@@ -340,13 +340,11 @@ export function extract(
             property: {
               type: "BinaryExpression",
               operator: "^",
-              anykey: [
-                {
+              left: {
                   type: "Identifier",
                   name: keyName,
-                },
-                { type: "Literal" },
-              ],
+              },
+              right: { type: "Literal" },
             },
             optional: false,
           };
